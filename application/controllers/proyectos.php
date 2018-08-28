@@ -8,8 +8,8 @@ class Proyectos extends CI_Controller {
 	}
 
 	function index(){
-		//$data['temphum'] = $this->Sensores_model->sensorTemperatura();
-		//$this->load->view('templates/header', $data);
+		$data['temphum'] = $this->Sensores_model->sensorTemperatura();
+		$this->load->view('templates/header', $data);
 
 		$this->load->view('proyectos/proyectos');
 		$this->load->view('templates/footer');

@@ -77,7 +77,7 @@ function llamadaAjax() {
  <meta charset="UTF-8">
  <meta http-equiv="X-UA-Compatible" content="IE=edge">
  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Control Ambiental</title>
+  <title>Control Ambiental NodeMCU</title>
 	<!--CARGA DE ARCHIVOS DE ESTILOS, PLUGINS Y LIBRERIAS -->
   <link href="<?php echo base_url(); ?>css/bootstrap.min.css" rel="stylesheet">
   <link href="<?php echo base_url(); ?>font-awesome/css/font-awesome.css" rel="stylesheet">
