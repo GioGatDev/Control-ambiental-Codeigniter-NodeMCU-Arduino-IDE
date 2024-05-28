@@ -25,8 +25,6 @@ use function var_export;
 use AssertionError;
 use PHPUnit\Event;
 use PHPUnit\Event\NoPreviousThrowableException;
-use PHPUnit\Event\TestData\MoreThanOneDataSetFromDataProviderException;
-use PHPUnit\Event\TestData\NoDataSetFromDataProviderException;
 use PHPUnit\Metadata\Api\CodeCoverage as CodeCoverageMetadataApi;
 use PHPUnit\Metadata\Parser\Registry as MetadataRegistry;
 use PHPUnit\Runner\CodeCoverage;
@@ -37,6 +35,7 @@ use PHPUnit\Util\GlobalState;
 use PHPUnit\Util\PHP\AbstractPhpProcess;
 use ReflectionClass;
 use SebastianBergmann\CodeCoverage\Exception as OriginalCodeCoverageException;
+use SebastianBergmann\CodeCoverage\InvalidArgumentException;
 use SebastianBergmann\CodeCoverage\StaticAnalysisCacheNotConfiguredException;
 use SebastianBergmann\CodeCoverage\UnintentionallyCoveredCodeException;
 use SebastianBergmann\Invoker\Invoker;
@@ -59,21 +58,17 @@ final class TestRunner
 
     /**
      * @throws \PHPUnit\Runner\Exception
-     * @throws \SebastianBergmann\CodeCoverage\InvalidArgumentException
      * @throws CodeCoverageException
-     * @throws MoreThanOneDataSetFromDataProviderException
-     * @throws NoDataSetFromDataProviderException
+     * @throws InvalidArgumentException
      * @throws UnintentionallyCoveredCodeException
      */
     public function run(TestCase $test): void
     {
         Assert::resetCount();
 
-        if ($this->configuration->registerMockObjectsFromTestArgumentsRecursively()) {
-            $test->registerMockObjectsFromTestArgumentsRecursively();
-        }
+        $codeCoverageMetadataApi = new CodeCoverageMetadataApi;
 
-        $shouldCodeCoverageBeCollected = (new CodeCoverageMetadataApi)->shouldCodeCoverageBeCollectedFor(
+        $shouldCodeCoverageBeCollected = $codeCoverageMetadataApi->shouldCodeCoverageBeCollectedFor(
             $test::class,
             $test->name(),
         );
@@ -157,12 +152,12 @@ final class TestRunner
 
             if ($append) {
                 try {
-                    $linesToBeCovered = (new CodeCoverageMetadataApi)->linesToBeCovered(
+                    $linesToBeCovered = $codeCoverageMetadataApi->linesToBeCovered(
                         $test::class,
                         $test->name(),
                     );
 
-                    $linesToBeUsed = (new CodeCoverageMetadataApi)->linesToBeUsed(
+                    $linesToBeUsed = $codeCoverageMetadataApi->linesToBeUsed(
                         $test::class,
                         $test->name(),
                     );
@@ -171,6 +166,8 @@ final class TestRunner
                         $test->valueObjectForEvents(),
                         $cce->getMessage(),
                     );
+
+                    $append = false;
                 }
             }
 
@@ -247,7 +244,6 @@ final class TestRunner
      * @throws \PHPUnit\Util\Exception
      * @throws \SebastianBergmann\Template\InvalidArgumentException
      * @throws Exception
-     * @throws MoreThanOneDataSetFromDataProviderException
      * @throws NoPreviousThrowableException
      * @throws ProcessIsolationException
      * @throws StaticAnalysisCacheNotConfiguredException
@@ -310,6 +306,7 @@ final class TestRunner
         $includePath             = "'." . $includePath . ".'";
         $offset                  = hrtime();
         $serializedConfiguration = $this->saveConfigurationForChildProcess();
+        $processResultFile       = tempnam(sys_get_temp_dir(), 'phpunit_');
 
         $var = [
             'bootstrap'                      => $bootstrap,
@@ -331,6 +328,7 @@ final class TestRunner
             'offsetSeconds'                  => $offset[0],
             'offsetNanoseconds'              => $offset[1],
             'serializedConfiguration'        => $serializedConfiguration,
+            'processResultFile'              => $processResultFile,
         ];
 
         if (!$runEntireClass) {
@@ -340,7 +338,7 @@ final class TestRunner
         $template->setVar($var);
 
         $php = AbstractPhpProcess::factory();
-        $php->runTestJob($template->render(), $test);
+        $php->runTestJob($template->render(), $test, $processResultFile);
 
         @unlink($serializedConfiguration);
     }
@@ -351,22 +349,26 @@ final class TestRunner
      */
     private function hasCoverageMetadata(string $className, string $methodName): bool
     {
-        $metadata = MetadataRegistry::parser()->forClassAndMethod($className, $methodName);
+        foreach (MetadataRegistry::parser()->forClassAndMethod($className, $methodName) as $metadata) {
+            if ($metadata->isCovers()) {
+                return true;
+            }
 
-        if ($metadata->isCovers()->isNotEmpty()) {
-            return true;
-        }
+            if ($metadata->isCoversClass()) {
+                return true;
+            }
 
-        if ($metadata->isCoversClass()->isNotEmpty()) {
-            return true;
-        }
+            if ($metadata->isCoversMethod()) {
+                return true;
+            }
 
-        if ($metadata->isCoversFunction()->isNotEmpty()) {
-            return true;
-        }
+            if ($metadata->isCoversFunction()) {
+                return true;
+            }
 
-        if ($metadata->isCoversNothing()->isNotEmpty()) {
-            return true;
+            if ($metadata->isCoversNothing()) {
+                return true;
+            }
         }
 
         return false;
@@ -412,12 +414,13 @@ final class TestRunner
     private function runTestWithTimeout(TestCase $test): bool
     {
         $_timeout = $this->configuration->defaultTimeLimit();
+        $testSize = $test->size();
 
-        if ($test->size()->isSmall()) {
+        if ($testSize->isSmall()) {
             $_timeout = $this->configuration->timeoutForSmallTests();
-        } elseif ($test->size()->isMedium()) {
+        } elseif ($testSize->isMedium()) {
             $_timeout = $this->configuration->timeoutForMediumTests();
-        } elseif ($test->size()->isLarge()) {
+        } elseif ($testSize->isLarge()) {
             $_timeout = $this->configuration->timeoutForLargeTests();
         }
 
@@ -446,7 +449,7 @@ final class TestRunner
     {
         $path = tempnam(sys_get_temp_dir(), 'phpunit_');
 
-        if (!$path) {
+        if ($path === false) {
             throw new ProcessIsolationException;
         }
 
